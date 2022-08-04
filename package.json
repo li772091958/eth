@@ -1,8 +1,13 @@
 {
+  "name": "eth",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node src/gen-address"
+  },
+  "type": "module",
   "dependencies": {
-    "crypto": "^1.0.1",
-    "crypto-js": "^4.1.1",
     "ethers": "^5.6.9",
-    "log4js": "^6.6.1"
+    "log4js": "^6.6.1",
+    "node-fetch": "^3.2.10"
   }
 }

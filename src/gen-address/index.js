@@ -1,12 +1,67 @@
-var cluster = require('cluster')
-var logger = require('../lib/logger')
-var { encrypt } = require('../lib/aes')
+import cluster from 'cluster'
+import { encrypt } from '../lib/aes.js'
+import logger from '../lib/logger.js'
+import request from '../lib/request.js'
+import { dingding, serverJong } from '../config/index.js'
+import getWallet from './generate.js'
 
 // var cpuNum = require('os').cpus().length
-var cpuNum = 4
-var getWallet = require('./generate')
+var cpuNum = 2
 
 const pids = []
+
+function writeResultLog(data) {
+  const { privateKey, address, count } = data
+  const { text, iv } = encrypt(privateKey)
+  const message = { address, p: text, i: iv }
+  logger.info(JSON.stringify(message))
+}
+
+function sendDingding(data) {
+  if (!dingding.access_token) {
+    console.log('未配置钉钉机器人')
+    return
+  }
+  const { privateKey, address, count } = data
+  const { text, iv } = encrypt(privateKey)
+  const body = JSON.stringify({
+    msgtype: 'markdown',
+    markdown: {
+      title: address,
+      text: `### ${address}\n - **加密后私钥** ${text} \n - **初始向量** ${iv}`,
+    },
+    at: { isAtAll: true },
+  })
+
+  return request(`https://oapi.dingtalk.com/robot/send?access_token=${dingding.access_token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', },
+    body,
+    dataType: 'json',
+  }).then(res => {
+    console.log(JSON.stringify(res))
+  })
+}
+
+function sendWechat(data) {
+  if (!serverJong.SendKey) {
+    console.log('未配置Server酱')
+    return
+  }
+  const { privateKey, address } = data
+  const { text, iv } = encrypt(privateKey)
+  const desp = `### 加密后私钥 \n ${text}  ### 初始向量 \n ${iv}`
+  const body = new URLSearchParams()
+  body.append('title', address)
+  body.append('desp', desp)
+
+  return request(`https://sctapi.ftqq.com/${serverJong.SendKey}.send`, {
+    method: 'POST',
+    body,
+  }).then(res => {
+    console.log(JSON.stringify(res))
+  })
+}
 
 if (cluster.isPrimary) {
   for (let i = 0; i < cpuNum; i++) {
@@ -16,11 +71,15 @@ if (cluster.isPrimary) {
     worker.send(pid)
   }
 
-  cluster.on('message', function (worker, { privateKey, address, count }) {
-    console.log('worker【' + worker.process.pid + '】detected ' + count + ' times')
-    const { text, iv } = encrypt(privateKey)
-    const message = { p: text, i: iv, address }
-    logger.info(JSON.stringify(message))
+  cluster.on('message', function (worker, msg) {
+    if (!msg || !msg.count || !msg.privateKey || !msg.address) {
+      console.log(msg)
+      return
+    }
+    console.log('worker【' + worker.process.pid + '】detected ' + msg.count + ' times')
+    writeResultLog(msg)
+    sendDingding(msg)
+    sendWechat(msg)
   })
 
   cluster.on('exit', function (worker, code, signal) {
@@ -28,9 +87,5 @@ if (cluster.isPrimary) {
   })
 
 } else {
-  process.on('message', (msg) => {
-    console.log('worker', msg, 'start')
-    const data = getWallet(/^0x([Aa]9){2}[0-9a-fA-F]+([Aa]9){2}/)
-    process.send(data)
-  })
+  getWallet(/^0x0{6}/)
 }
